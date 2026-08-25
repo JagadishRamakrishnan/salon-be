@@ -1,0 +1,338 @@
+import Appointment from "../models/Appointment.js";
+import Service from "../models/Service.js";
+import Staff from "../models/Staff.js";
+import User from "../models/User.js";
+function minutes(time) {
+    const [h, m] = time.split(":").map(Number);
+    return h * 60 + m;
+}
+export async function availability(req, res, next) {
+    try {
+        const { staff, service, date } = req.query;
+        const [person, treatment] = await Promise.all([
+            Staff.findById(staff),
+            Service.findById(service),
+        ]);
+        if (!person || !treatment)
+            return res
+                .status(404)
+                .json({ success: false, message: "Staff or service not found" });
+        const day = new Date(`${date}T00:00:00`).getDay();
+        const hours = person.workingHours.find((item) => item.day === day);
+        if (!hours || hours.closed) return res.json({ success: true, data: [] });
+        const appointments = await Appointment.find({
+            staff,
+            date: {
+                $gte: new Date(`${date}T00:00:00`),
+                $lt: new Date(`${date}T23:59:59`),
+            },
+            status: { $nin: ["Cancelled"] },
+        });
+        const slots = [];
+        for (
+            let current = minutes(hours.open);
+            current + treatment.duration <= minutes(hours.close);
+            current += 30
+        ) {
+            const end = current + treatment.duration;
+            if (
+                !appointments.some(
+                    (item) =>
+                        current < minutes(item.endTime) && end > minutes(item.startTime),
+                )
+            )
+                slots.push(
+                    `${String(Math.floor(current / 60)).padStart(2, "0")}:${String(current % 60).padStart(2, "0")}`,
+                );
+        }
+        res.json({ success: true, data: slots });
+    } catch (e) {
+        next(e);
+    }
+}
+export async function createAppointment(req, res, next) {
+    try {
+        const { salon, service, staff, date, startTime } = req.body;
+        const treatment = await Service.findOne({
+            _id: service,
+            salon,
+            status: "active",
+        });
+        const person = await Staff.findOne({ _id: staff, salon, status: "active" });
+        if (!treatment || !person)
+            return res
+                .status(400)
+                .json({ success: false, message: "Service or staff is unavailable" });
+        const start = minutes(startTime);
+        const end = start + treatment.duration;
+        const endTime = `${String(Math.floor(end / 60)).padStart(2, "0")}:${String(end % 60).padStart(2, "0")}`;
+        const overlap = await Appointment.exists({
+            staff,
+            date: {
+                $gte: new Date(`${date}T00:00:00`),
+                $lt: new Date(`${date}T23:59:59`),
+            },
+            status: { $nin: ["Cancelled"] },
+            startTime: { $lt: endTime },
+            endTime: { $gt: startTime },
+        });
+        if (overlap)
+            return res
+                .status(409)
+                .json({
+                    success: false,
+                    message: "Appointment slot is no longer available",
+                });
+        const appointment = await Appointment.create({
+            customer: req.user._id,
+            salon,
+            service,
+            staff,
+            date,
+            startTime,
+            endTime,
+            price: treatment.price,
+        });
+        res
+            .status(201)
+            .json({
+                success: true,
+                data: await appointment.populate(["service", "staff", "salon"]),
+            });
+    } catch (e) {
+        next(e);
+    }
+}
+export async function myAppointments(req, res, next) {
+    try {
+        const filter =
+            req.user.role === "customer"
+                ? { customer: req.user._id }
+                : { salon: req.user.salon };
+        res.json({
+            success: true,
+            data: await Appointment.find(filter)
+                .populate("customer service staff salon")
+                .sort("-date"),
+        });
+    } catch (e) {
+        next(e);
+    }
+}
+export async function cancelAppointment(req, res, next) {
+    try {
+        const appointment = await Appointment.findOneAndUpdate(
+            {
+                _id: req.params.id,
+                customer: req.user._id,
+                status: { $in: ["Pending", "Confirmed"] },
+            },
+            { status: "Cancelled" },
+            { new: true },
+        );
+        if (!appointment)
+            return res
+                .status(400)
+                .json({
+                    success: false,
+                    message: "This appointment cannot be cancelled",
+                });
+        res.json({ success: true, data: appointment });
+    } catch (e) {
+        next(e);
+    }
+}
+
+/* ------------------------------------------------------------------ */
+/* Admin / manager appointment management                              */
+/* ------------------------------------------------------------------ */
+
+function scopeSalon(req, filter) {
+    if (req.user.role === "manager") filter.salon = req.user.salon;
+    else if (req.query.salon) filter.salon = req.query.salon;
+    return filter;
+}
+
+export async function adminListAppointments(req, res, next) {
+    try {
+        const {
+            status,
+            staff,
+            service,
+            date,
+            search,
+            page = 1,
+            limit = 10,
+        } = req.query;
+        const filter = scopeSalon(req, {});
+        if (status) filter.status = status;
+        if (staff) filter.staff = staff;
+        if (service) filter.service = service;
+        if (date)
+            filter.date = {
+                $gte: new Date(`${date}T00:00:00`),
+                $lt: new Date(`${date}T23:59:59`),
+            };
+        let query = Appointment.find(filter)
+            .populate("customer", "name email phone")
+            .populate("service", "name price")
+            .populate("staff", "name")
+            .populate("salon", "name city")
+            .sort("-date -startTime");
+        let items = await query;
+        if (search) {
+            const term = search.toLowerCase();
+            items = items.filter(
+                (item) =>
+                    item.customer?.name?.toLowerCase().includes(term) ||
+                    item.customer?.email?.toLowerCase().includes(term) ||
+                    item.service?.name?.toLowerCase().includes(term) ||
+                    item.staff?.name?.toLowerCase().includes(term),
+            );
+        }
+        const total = items.length;
+        const skip = (Number(page) - 1) * Number(limit);
+        const paged = items.slice(skip, skip + Number(limit));
+        res.json({
+            success: true,
+            data: paged,
+            pagination: { page: Number(page), limit: Number(limit), total },
+        });
+    } catch (e) {
+        next(e);
+    }
+}
+
+export async function getAppointment(req, res, next) {
+    try {
+        const appointment = await Appointment.findById(req.params.id)
+            .populate("customer", "name email phone")
+            .populate("service", "name price duration")
+            .populate("staff", "name specialty")
+            .populate("salon", "name city");
+        if (!appointment)
+            return res
+                .status(404)
+                .json({ success: false, message: "Appointment not found" });
+        res.json({ success: true, data: appointment });
+    } catch (e) {
+        next(e);
+    }
+}
+
+export async function adminCreateAppointment(req, res, next) {
+    try {
+        const { customer, salon, service, staff, date, startTime, notes } =
+            req.body;
+        const [customerRecord, treatment, person] = await Promise.all([
+            User.findById(customer),
+            Service.findById(service),
+            Staff.findById(staff),
+        ]);
+        if (!customerRecord || !treatment || !person)
+            return res.status(400).json({
+                success: false,
+                message: "Customer, service or staff is invalid",
+            });
+        const start = minutes(startTime);
+        const end = start + treatment.duration;
+        const endTime = `${String(Math.floor(end / 60)).padStart(2, "0")}:${String(end % 60).padStart(2, "0")}`;
+        const overlap = await Appointment.exists({
+            staff,
+            date: {
+                $gte: new Date(`${date}T00:00:00`),
+                $lt: new Date(`${date}T23:59:59`),
+            },
+            status: { $nin: ["Cancelled"] },
+            startTime: { $lt: endTime },
+            endTime: { $gt: startTime },
+        });
+        if (overlap)
+            return res.status(409).json({
+                success: false,
+                message: "This staff member already has an appointment at that time",
+            });
+        const appointment = await Appointment.create({
+            customer,
+            salon,
+            service,
+            staff,
+            date,
+            startTime,
+            endTime,
+            price: treatment.price,
+            notes,
+        });
+        res.status(201).json({
+            success: true,
+            data: await appointment.populate(["customer", "service", "staff", "salon"]),
+        });
+    } catch (e) {
+        next(e);
+    }
+}
+
+export async function updateAppointment(req, res, next) {
+    try {
+        const filter = { _id: req.params.id };
+        if (req.user.role === "manager") filter.salon = req.user.salon;
+        const updates = { ...req.body };
+        if (updates.service && updates.startTime) {
+            const treatment = await Service.findById(updates.service);
+            if (treatment) {
+                const start = minutes(updates.startTime);
+                const end = start + treatment.duration;
+                updates.endTime = `${String(Math.floor(end / 60)).padStart(2, "0")}:${String(end % 60).padStart(2, "0")}`;
+                updates.price = treatment.price;
+            }
+        }
+        const appointment = await Appointment.findOneAndUpdate(filter, updates, {
+            new: true,
+            runValidators: true,
+        }).populate(["customer", "service", "staff", "salon"]);
+        if (!appointment)
+            return res
+                .status(404)
+                .json({ success: false, message: "Appointment not found" });
+        res.json({ success: true, data: appointment });
+    } catch (e) {
+        next(e);
+    }
+}
+
+export async function updateAppointmentStatus(req, res, next) {
+    try {
+        const filter = { _id: req.params.id };
+        if (req.user.role === "manager") filter.salon = req.user.salon;
+        const { status } = req.body;
+        if (!["Pending", "Confirmed", "Completed", "Cancelled"].includes(status))
+            return res.status(422).json({ success: false, message: "Invalid status" });
+        const appointment = await Appointment.findOneAndUpdate(
+            filter,
+            { status },
+            { new: true },
+        ).populate(["customer", "service", "staff", "salon"]);
+        if (!appointment)
+            return res
+                .status(404)
+                .json({ success: false, message: "Appointment not found" });
+        res.json({ success: true, data: appointment });
+    } catch (e) {
+        next(e);
+    }
+}
+
+export async function deleteAppointment(req, res, next) {
+    try {
+        const filter = { _id: req.params.id };
+        if (req.user.role === "manager") filter.salon = req.user.salon;
+        const appointment = await Appointment.findOneAndDelete(filter);
+        if (!appointment)
+            return res
+                .status(404)
+                .json({ success: false, message: "Appointment not found" });
+        res.json({ success: true, data: appointment });
+    } catch (e) {
+        next(e);
+    }
+}
