@@ -1,7 +1,7 @@
 import Staff from "../models/Staff.js";
 
 function scopeSalon(req, filter) {
-    if (req.user.role === "manager") filter.salon = req.user.salon;
+    if (req.user.role === "manager") filter.salon = req.user.salonId;
     else if (req.query.salon) filter.salon = req.query.salon;
     return filter;
 }
@@ -39,7 +39,9 @@ export async function listStaff(req, res, next) {
 
 export async function getStaff(req, res, next) {
     try {
-        const staff = await Staff.findById(req.params.id)
+        const filter = { _id: req.params.id };
+        if (req.user.role === "manager") filter.salon = req.user.salonId;
+        const staff = await Staff.findOne(filter)
             .populate("salon", "name city")
             .populate("services", "name price");
         if (!staff)
@@ -53,7 +55,7 @@ export async function getStaff(req, res, next) {
 export async function createStaff(req, res, next) {
     try {
         const payload = { ...req.body };
-        if (req.user.role === "manager") payload.salon = req.user.salon;
+        if (req.user.role === "manager") payload.salon = req.user.salonId;
         if (!payload.salon)
             return res.status(422).json({ success: false, message: "Salon is required" });
         const staff = await Staff.create(payload);
@@ -66,8 +68,10 @@ export async function createStaff(req, res, next) {
 export async function updateStaff(req, res, next) {
     try {
         const filter = { _id: req.params.id };
-        if (req.user.role === "manager") filter.salon = req.user.salon;
-        const staff = await Staff.findOneAndUpdate(filter, req.body, {
+        if (req.user.role === "manager") filter.salon = req.user.salonId;
+        const updates = { ...req.body };
+        if (req.user.role === "manager") delete updates.salon;
+        const staff = await Staff.findOneAndUpdate(filter, updates, {
             new: true,
             runValidators: true,
         });
@@ -82,7 +86,7 @@ export async function updateStaff(req, res, next) {
 export async function deleteStaff(req, res, next) {
     try {
         const filter = { _id: req.params.id };
-        if (req.user.role === "manager") filter.salon = req.user.salon;
+        if (req.user.role === "manager") filter.salon = req.user.salonId;
         const staff = await Staff.findOneAndDelete(filter);
         if (!staff)
             return res.status(404).json({ success: false, message: "Staff member not found" });

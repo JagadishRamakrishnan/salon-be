@@ -1,7 +1,7 @@
 import Service from "../models/Service.js";
 
 function scopeSalon(req, filter) {
-    if (req.user.role === "manager") filter.salon = req.user.salon;
+    if (req.user.role === "manager") filter.salon = req.user.salonId;
     else if (req.query.salon) filter.salon = req.query.salon;
     return filter;
 }
@@ -35,7 +35,9 @@ export async function listServices(req, res, next) {
 
 export async function getService(req, res, next) {
     try {
-        const service = await Service.findById(req.params.id)
+        const filter = { _id: req.params.id };
+        if (req.user.role === "manager") filter.salon = req.user.salonId;
+        const service = await Service.findOne(filter)
             .populate("category", "name")
             .populate("salon", "name city")
             .populate("staff", "name");
@@ -50,7 +52,7 @@ export async function getService(req, res, next) {
 export async function createService(req, res, next) {
     try {
         const payload = { ...req.body };
-        if (req.user.role === "manager") payload.salon = req.user.salon;
+        if (req.user.role === "manager") payload.salon = req.user.salonId;
         if (!payload.salon)
             return res.status(422).json({ success: false, message: "Salon is required" });
         const service = await Service.create(payload);
@@ -63,8 +65,10 @@ export async function createService(req, res, next) {
 export async function updateService(req, res, next) {
     try {
         const filter = { _id: req.params.id };
-        if (req.user.role === "manager") filter.salon = req.user.salon;
-        const service = await Service.findOneAndUpdate(filter, req.body, {
+        if (req.user.role === "manager") filter.salon = req.user.salonId;
+        const updates = { ...req.body };
+        if (req.user.role === "manager") delete updates.salon;
+        const service = await Service.findOneAndUpdate(filter, updates, {
             new: true,
             runValidators: true,
         });
@@ -79,7 +83,7 @@ export async function updateService(req, res, next) {
 export async function deleteService(req, res, next) {
     try {
         const filter = { _id: req.params.id };
-        if (req.user.role === "manager") filter.salon = req.user.salon;
+        if (req.user.role === "manager") filter.salon = req.user.salonId;
         const service = await Service.findOneAndDelete(filter);
         if (!service)
             return res.status(404).json({ success: false, message: "Service not found" });

@@ -17,6 +17,8 @@ export async function availability(req, res, next) {
             return res
                 .status(404)
                 .json({ success: false, message: "Staff or service not found" });
+        if (req.user?.role === "manager" && (String(person.salon) !== String(req.user.salonId) || String(treatment.salon) !== String(req.user.salonId)))
+            return res.status(403).json({ success: false, message: "Access denied for this salon" });
         const day = new Date(`${date}T00:00:00`).getDay();
         const hours = person.workingHours.find((item) => item.day === day);
         if (!hours || hours.closed) return res.json({ success: true, data: [] });
@@ -52,7 +54,8 @@ export async function availability(req, res, next) {
 }
 export async function createAppointment(req, res, next) {
     try {
-        const { salon, service, staff, date, startTime } = req.body;
+        const { service, staff, date, startTime } = req.body;
+        const salon = req.user.role === "manager" ? req.user.salonId : req.body.salon;
         const treatment = await Service.findOne({
             _id: service,
             salon,
@@ -108,7 +111,7 @@ export async function myAppointments(req, res, next) {
         const filter =
             req.user.role === "customer"
                 ? { customer: req.user._id }
-                : { salon: req.user.salon };
+                : { salon: req.user.salonId };
         res.json({
             success: true,
             data: await Appointment.find(filter)
@@ -148,7 +151,7 @@ export async function cancelAppointment(req, res, next) {
 /* ------------------------------------------------------------------ */
 
 function scopeSalon(req, filter) {
-    if (req.user.role === "manager") filter.salon = req.user.salon;
+    if (req.user.role === "manager") filter.salon = req.user.salonId;
     else if (req.query.salon) filter.salon = req.query.salon;
     return filter;
 }
@@ -205,7 +208,9 @@ export async function adminListAppointments(req, res, next) {
 
 export async function getAppointment(req, res, next) {
     try {
-        const appointment = await Appointment.findById(req.params.id)
+        const filter = { _id: req.params.id };
+        if (req.user.role === "manager") filter.salon = req.user.salonId;
+        const appointment = await Appointment.findOne(filter)
             .populate("customer", "name email phone")
             .populate("service", "name price duration")
             .populate("staff", "name specialty")
@@ -222,8 +227,9 @@ export async function getAppointment(req, res, next) {
 
 export async function adminCreateAppointment(req, res, next) {
     try {
-        const { customer, salon, service, staff, date, startTime, notes } =
+        const { customer, service, staff, date, startTime, notes } =
             req.body;
+        const salon = req.user.role === "manager" ? req.user.salonId : req.body.salon;
         const [customerRecord, treatment, person] = await Promise.all([
             User.findById(customer),
             Service.findById(service),
@@ -234,6 +240,8 @@ export async function adminCreateAppointment(req, res, next) {
                 success: false,
                 message: "Customer, service or staff is invalid",
             });
+        if (req.user.role === "manager" && (String(treatment.salon) !== String(salon) || String(person.salon) !== String(salon)))
+            return res.status(403).json({ success: false, message: "Service and staff must belong to your salon" });
         const start = minutes(startTime);
         const end = start + treatment.duration;
         const endTime = `${String(Math.floor(end / 60)).padStart(2, "0")}:${String(end % 60).padStart(2, "0")}`;
@@ -275,10 +283,23 @@ export async function adminCreateAppointment(req, res, next) {
 export async function updateAppointment(req, res, next) {
     try {
         const filter = { _id: req.params.id };
-        if (req.user.role === "manager") filter.salon = req.user.salon;
+        if (req.user.role === "manager") filter.salon = req.user.salonId;
         const updates = { ...req.body };
+        if (req.user.role === "manager") delete updates.salon;
+        if (req.user.role === "manager" && (updates.service || updates.staff)) {
+            const [treatment, person] = await Promise.all([
+                updates.service ? Service.findById(updates.service) : null,
+                updates.staff ? Staff.findById(updates.staff) : null,
+            ]);
+            if (treatment && String(treatment.salon) !== String(req.user.salonId) || person && String(person.salon) !== String(req.user.salonId))
+                return res.status(403).json({ success: false, message: "Service and staff must belong to your salon" });
+            if (updates.service && !treatment || updates.staff && !person)
+                return res.status(404).json({ success: false, message: "Service or staff not found" });
+        }
         if (updates.service && updates.startTime) {
             const treatment = await Service.findById(updates.service);
+            if (req.user.role === "manager" && (!treatment || String(treatment.salon) !== String(req.user.salonId)))
+                return res.status(403).json({ success: false, message: "Service does not belong to your salon" });
             if (treatment) {
                 const start = minutes(updates.startTime);
                 const end = start + treatment.duration;
@@ -303,7 +324,7 @@ export async function updateAppointment(req, res, next) {
 export async function updateAppointmentStatus(req, res, next) {
     try {
         const filter = { _id: req.params.id };
-        if (req.user.role === "manager") filter.salon = req.user.salon;
+        if (req.user.role === "manager") filter.salon = req.user.salonId;
         const { status } = req.body;
         if (!["Pending", "Confirmed", "Completed", "Cancelled"].includes(status))
             return res.status(422).json({ success: false, message: "Invalid status" });
@@ -325,7 +346,7 @@ export async function updateAppointmentStatus(req, res, next) {
 export async function deleteAppointment(req, res, next) {
     try {
         const filter = { _id: req.params.id };
-        if (req.user.role === "manager") filter.salon = req.user.salon;
+        if (req.user.role === "manager") filter.salon = req.user.salonId;
         const appointment = await Appointment.findOneAndDelete(filter);
         if (!appointment)
             return res

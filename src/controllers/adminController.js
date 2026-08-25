@@ -5,7 +5,7 @@ import Service from "../models/Service.js";
 import Appointment from "../models/Appointment.js";
 export async function stats(req, res, next) {
     try {
-        const [customers, salons, owners, staff, services, appointments] =
+        const [customers, salons, managers, staff, services, appointments] =
             await Promise.all([
                 User.countDocuments({ role: "customer" }),
                 Salon.countDocuments(),
@@ -16,7 +16,7 @@ export async function stats(req, res, next) {
             ]);
         res.json({
             success: true,
-            data: { customers, salons, owners, staff, services, appointments },
+            data: { customers, salons, managers, staff, services, appointments },
         });
     } catch (e) {
         next(e);

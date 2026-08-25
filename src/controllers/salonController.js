@@ -19,6 +19,8 @@ export async function listSalons(req, res, next) {
 }
 export async function getSalon(req, res, next) {
     try {
+        if (req.user?.role === "manager" && String(req.user.salonId) !== req.params.id)
+            return res.status(403).json({ success: false, message: "Access denied for this salon" });
         const salon = await Salon.findById(req.params.id).populate(
             "manager",
             "name email",
@@ -41,8 +43,9 @@ export async function getSalon(req, res, next) {
 }
 export async function dashboard(req, res, next) {
     try {
-        const salonId =
-            req.user.role === "manager" ? req.user.salon : req.query.salon;
+        const salonId = req.user.role === "manager" ? req.user.salonId : req.query.salon;
+        if (!salonId)
+            return res.status(422).json({ success: false, message: "Salon is required" });
         const [salon, services, staff] = await Promise.all([
             Salon.findById(salonId),
             Service.countDocuments({ salon: salonId, status: "active" }),

@@ -11,6 +11,7 @@ export async function protect(req, res, next) {
                 .json({ success: false, message: "Authentication required" });
         const decoded = jwt.verify(token, process.env.JWT_SECRET);
         req.user = await User.findById(decoded.id).select("-password");
+        if (req.user) req.user.salonId = req.user.salon;
         if (!req.user || req.user.status !== "active")
             return res
                 .status(401)
@@ -21,6 +22,21 @@ export async function protect(req, res, next) {
             .status(401)
             .json({ success: false, message: "Invalid or expired session" });
     }
+}
+export async function optionalProtect(req, res, next) {
+    try {
+        const token = req.headers.authorization?.startsWith("Bearer ")
+            ? req.headers.authorization.split(" ")[1]
+            : null;
+        if (token) {
+            const decoded = jwt.verify(token, process.env.JWT_SECRET);
+            req.user = await User.findById(decoded.id).select("-password");
+            if (req.user) req.user.salonId = req.user.salon;
+        }
+    } catch {
+        // Public browsing remains available when an optional session is invalid.
+    }
+    next();
 }
 export const authorize =
     (...roles) =>

@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { register, login, me } from "../controllers/authController.js";
-import { protect, authorize } from "../middleware/auth.js";
+import { protect, optionalProtect, authorize } from "../middleware/auth.js";
 import {
     listSalons,
     getSalon,
@@ -51,6 +51,14 @@ import {
     updateCustomer,
     deleteCustomer,
 } from "../controllers/userController.js";
+import {
+    listManagers,
+    getManager,
+    createManager,
+    updateManager,
+    updateManagerStatus,
+    deleteManager,
+} from "../controllers/managerController.js";
 
 const router = Router();
 
@@ -61,12 +69,12 @@ router.get("/auth/me", protect, me);
 
 /* Public / customer-facing salon browsing */
 router.get("/salons", listSalons);
-router.get("/salons/:id", getSalon);
+router.get("/salons/:id", optionalProtect, getSalon);
 router.get("/dashboard/manager", protect, authorize("manager"), dashboard);
 router.get("/dashboard/admin", protect, authorize("admin"), stats);
 
 /* Customer booking */
-router.get("/availability", availability);
+router.get("/availability", optionalProtect, availability);
 router.get("/appointments", protect, myAppointments);
 router.post("/appointments", protect, authorize("customer"), createAppointment);
 router.patch(
@@ -190,5 +198,13 @@ router.delete(
     authorize("admin"),
     deleteCustomer,
 );
+
+/* Admin - Manager management */
+router.get("/managers", protect, authorize("admin"), listManagers);
+router.get("/managers/:id", protect, authorize("admin"), getManager);
+router.post("/managers", protect, authorize("admin"), createManager);
+router.put("/managers/:id", protect, authorize("admin"), updateManager);
+router.patch("/managers/:id/status", protect, authorize("admin"), updateManagerStatus);
+router.delete("/managers/:id", protect, authorize("admin"), deleteManager);
 
 export default router;

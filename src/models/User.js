@@ -18,7 +18,13 @@ const userSchema = new mongoose.Schema(
             default: "customer",
         },
         status: { type: String, enum: ["active", "inactive"], default: "active" },
-        salon: { type: mongoose.Schema.Types.ObjectId, ref: "Salon" },
+        salon: {
+            type: mongoose.Schema.Types.ObjectId,
+            ref: "Salon",
+            required: function () {
+                return this.role === "manager";
+            },
+        },
     },
     { timestamps: true },
 );
