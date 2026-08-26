@@ -14,7 +14,7 @@ const userSchema = new mongoose.Schema(
         password: { type: String, required: true, select: false },
         role: {
             type: String,
-            enum: ["customer", "manager", "admin"],
+            enum: ["customer", "manager", "owner", "admin"],
             default: "customer",
         },
         status: { type: String, enum: ["active", "inactive"], default: "active" },
@@ -22,7 +22,7 @@ const userSchema = new mongoose.Schema(
             type: mongoose.Schema.Types.ObjectId,
             ref: "Salon",
             required: function () {
-                return this.role === "manager";
+                return ["manager", "owner"].includes(this.role);
             },
         },
     },

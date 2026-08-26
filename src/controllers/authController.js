@@ -39,7 +39,7 @@ export async function register(req, res, next) {
             email,
             phone,
             password: await bcrypt.hash(password, 12),
-            role: role || "customer",
+            role: "customer",
         });
 
         res.status(201).json({

@@ -15,7 +15,14 @@ const staffSchema = new mongoose.Schema(
         workingHours: [
             { day: Number, open: String, close: String, closed: Boolean },
         ],
-        leaves: [{ startDate: Date, endDate: Date, reason: String }],
+        leaves: [{
+            startDate: { type: Date, required: true },
+            endDate: { type: Date, required: true },
+            startTime: String,
+            endTime: String,
+            reason: String,
+            status: { type: String, enum: ["active", "cancelled"], default: "active" },
+        }],
         rating: { type: Number, default: 4.9 },
         status: { type: String, enum: ["active", "inactive"], default: "active" },
     },

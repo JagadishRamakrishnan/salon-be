@@ -1,7 +1,7 @@
 import Service from "../models/Service.js";
 
 function scopeSalon(req, filter) {
-    if (req.user.role === "manager") filter.salon = req.user.salonId;
+    if (["manager", "owner"].includes(req.user.role)) filter.salon = req.user.salonId;
     else if (req.query.salon) filter.salon = req.query.salon;
     return filter;
 }
@@ -9,7 +9,9 @@ function scopeSalon(req, filter) {
 export async function listServices(req, res, next) {
     try {
         const { search, status, category, page = 1, limit = 10 } = req.query;
-        const filter = scopeSalon(req, {});
+        const filter = { status: "active" };
+        if (req.user && ["manager", "owner"].includes(req.user.role)) filter.salon = req.user.salonId;
+        else if (req.query.salon) filter.salon = req.query.salon;
         if (status) filter.status = status;
         if (category) filter.category = category;
         if (search) filter.name = new RegExp(search, "i");
@@ -17,7 +19,7 @@ export async function listServices(req, res, next) {
         const [items, total] = await Promise.all([
             Service.find(filter)
                 .populate("category", "name")
-                .populate("salon", "name city")
+                .populate("salon", "name city image")
                 .sort("-createdAt")
                 .skip(skip)
                 .limit(Number(limit)),
@@ -36,7 +38,7 @@ export async function listServices(req, res, next) {
 export async function getService(req, res, next) {
     try {
         const filter = { _id: req.params.id };
-        if (req.user.role === "manager") filter.salon = req.user.salonId;
+        if (["manager", "owner"].includes(req.user.role)) filter.salon = req.user.salonId;
         const service = await Service.findOne(filter)
             .populate("category", "name")
             .populate("salon", "name city")
@@ -52,7 +54,7 @@ export async function getService(req, res, next) {
 export async function createService(req, res, next) {
     try {
         const payload = { ...req.body };
-        if (req.user.role === "manager") payload.salon = req.user.salonId;
+        if (["manager", "owner"].includes(req.user.role)) payload.salon = req.user.salonId;
         if (!payload.salon)
             return res.status(422).json({ success: false, message: "Salon is required" });
         const service = await Service.create(payload);
@@ -65,9 +67,9 @@ export async function createService(req, res, next) {
 export async function updateService(req, res, next) {
     try {
         const filter = { _id: req.params.id };
-        if (req.user.role === "manager") filter.salon = req.user.salonId;
+        if (["manager", "owner"].includes(req.user.role)) filter.salon = req.user.salonId;
         const updates = { ...req.body };
-        if (req.user.role === "manager") delete updates.salon;
+        if (["manager", "owner"].includes(req.user.role)) delete updates.salon;
         const service = await Service.findOneAndUpdate(filter, updates, {
             new: true,
             runValidators: true,
@@ -83,7 +85,7 @@ export async function updateService(req, res, next) {
 export async function deleteService(req, res, next) {
     try {
         const filter = { _id: req.params.id };
-        if (req.user.role === "manager") filter.salon = req.user.salonId;
+        if (["manager", "owner"].includes(req.user.role)) filter.salon = req.user.salonId;
         const service = await Service.findOneAndDelete(filter);
         if (!service)
             return res.status(404).json({ success: false, message: "Service not found" });

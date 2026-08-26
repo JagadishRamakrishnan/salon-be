@@ -40,7 +40,10 @@ export async function createSalon(req, res, next) {
 
 export async function updateSalon(req, res, next) {
     try {
-        const salon = await Salon.findByIdAndUpdate(req.params.id, req.body, {
+        const filter = ["manager", "owner"].includes(req.user.role)
+            ? { _id: req.user.salonId }
+            : { _id: req.params.id };
+        const salon = await Salon.findOneAndUpdate(filter, req.body, {
             new: true,
             runValidators: true,
         });

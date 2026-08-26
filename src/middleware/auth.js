@@ -44,3 +44,9 @@ export const authorize =
             roles.includes(req.user.role)
                 ? next()
                 : res.status(403).json({ success: false, message: "Access denied" });
+
+export const salonScoped = (req, res, next) => {
+    if (["manager", "owner"].includes(req.user.role) && !req.user.salonId)
+        return res.status(403).json({ success: false, message: "No salon is assigned to this account" });
+    next();
+};
